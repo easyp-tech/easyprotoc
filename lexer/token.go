@@ -205,7 +205,7 @@ func CorpusChecksum(fileChecksums []uint64) uint64 {
 	return h
 }
 
-// FormatDump generates the textual token dump conforming to docs/spec/lexer.md §5:
+// FormatDump generates the textual token dump used by testdata/lexer/*.tokens:
 // # <path>
 // <kind-name> <start> <len>
 // ...

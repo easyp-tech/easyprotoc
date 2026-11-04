@@ -2,3 +2,4 @@
 /bench/.cache/
 /bench/bin/
 .DS_Store
+/bench/results/*.jsonl

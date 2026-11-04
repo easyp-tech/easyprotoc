@@ -31,7 +31,8 @@ func isWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\r' || b == '\v' || b == '\f'
 }
 
-// matchInt validates a numeric run against INT grammar rules from docs/spec/lexer.md §3.2:
+// matchInt validates a numeric run against the integer literal grammar
+// (https://protobuf.com/docs/language-spec#numeric-literals):
 //
 //	Hex:     0[xX][0-9A-Fa-f]+
 //	Octal:   0[0-7]* (note: single '0' matches this)
@@ -70,7 +71,8 @@ func matchInt(b []byte) bool {
 	return false
 }
 
-// matchFloat validates a numeric run against FLOAT grammar rules from docs/spec/lexer.md §3.2:
+// matchFloat validates a numeric run against the floating-point literal grammar
+// (https://protobuf.com/docs/language-spec#numeric-literals):
 //
 //	Form 1: D+ "." D* E?
 //	Form 2: D+ E
@@ -154,7 +156,8 @@ func matchExponent(b []byte) bool {
 }
 
 // Lex performs lexical analysis of the input byte slice, populating ts with tokens
-// and the line start table according to docs/spec/lexer.md.
+// and the line start table, following the lexical grammar at
+// https://protobuf.com/docs/language-spec#lexical-elements.
 func Lex(src []byte, ts *TokenStream) error {
 	if len(src) > math.MaxUint32 {
 		return ErrFileTooLarge
