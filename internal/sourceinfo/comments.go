@@ -236,9 +236,7 @@ func cleanCommentText(src []byte, start, length uint32, kind lexer.Kind) string 
 	raw := src[start : start+length]
 	if kind == lexer.KindLineComment {
 		txt := string(raw)
-		if strings.HasPrefix(txt, "//") {
-			txt = txt[2:]
-		}
+		txt = strings.TrimPrefix(txt, "//")
 		txt = strings.TrimRight(txt, "\r")
 		return txt + "\n"
 	}

@@ -21,7 +21,7 @@ func TestSharedErrorCorpus(t *testing.T) {
 	if err := os.Chdir(root); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(wd)
+	defer func() { _ = os.Chdir(wd) }()
 	errorsDir := filepath.Join(root, "testdata", "errors")
 	protocInclude := filepath.Join(root, "protoc", "wkt")
 

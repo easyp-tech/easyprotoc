@@ -1,0 +1,16 @@
+version: "2"
+linters:
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      # Defaults, minus QF1003: an if/else chain on one value stays an if/else chain.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF1003"]
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # protoc's own wording, kept so diagnostics match protoc.
+      - linters: [staticcheck]
+        text: '^ST1005:'
+        source: 'File not found\.'

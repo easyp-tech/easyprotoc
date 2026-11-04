@@ -631,9 +631,7 @@ func (g *generator) generateOption(opt *parser.OptionNode, compact bool, targetT
 		if isRep {
 			optPath = append(optPath, count)
 		}
-		for _, st := range subTags {
-			optPath = append(optPath, st)
-		}
+		optPath = append(optPath, subTags...)
 	} else {
 		idx := *uninterpIdx
 		*uninterpIdx++

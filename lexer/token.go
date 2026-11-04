@@ -219,7 +219,7 @@ func (ts *TokenStream) FormatDump(path string) string {
 	for i := 0; i < n; i++ {
 		sb.WriteString(ts.Kinds[i].String())
 		sb.WriteByte(' ')
-		sb.WriteString(fmt.Sprintf("%d %d\n", ts.Starts[i], ts.Lens[i]))
+		fmt.Fprintf(&sb, "%d %d\n", ts.Starts[i], ts.Lens[i])
 	}
 	return sb.String()
 }

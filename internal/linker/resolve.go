@@ -57,10 +57,10 @@ func (t *SymbolTable) lookupSymbol(callerFileID uint32, scope string, name strin
 			// protoc skips a first component that cannot contain nested names
 			// (field, enum value, method, extension) and keeps searching outward.
 			if rest != "" && !sym.Kind.isAggregate() {
-				symID, ok = 0, false
+				ok = false
 			}
 			if rest == "" && typesOnly && sym.Kind != SymMessage && sym.Kind != SymEnum {
-				symID, ok = 0, false
+				ok = false
 			}
 			if ok && (sym.Kind == SymPackage || t.Vis.IsVisible(callerFileID, sym.FileID)) {
 				// First component resolved in this scope
