@@ -1,5 +1,44 @@
 package options
 
+import (
+	"strings"
+
+	"github.com/easyp-tech/easyprotoc/internal/linker"
+	"github.com/easyp-tech/easyprotoc/parser"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
+)
+
+func standardDescriptor(name string) protoreflect.Descriptor {
+	if !strings.HasPrefix(name, ".google.protobuf.") {
+		return nil
+	}
+	descriptor, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(name[1:]))
+	if err != nil || descriptor.ParentFile() != descriptorpb.File_google_protobuf_descriptor_proto {
+		return nil
+	}
+	return descriptor
+}
+
+func standardField(message protoreflect.MessageDescriptor, name string) (linker.FieldInfo, bool) {
+	field := message.Fields().ByName(protoreflect.Name(name))
+	if field == nil {
+		return linker.FieldInfo{}, false
+	}
+	info := linker.FieldInfo{
+		Name: name, TagNumber: int32(field.Number()),
+		TypeKind: parser.FieldTypeKind(field.Kind()), Label: parser.FieldLabel(field.Cardinality()),
+	}
+	if field.Message() != nil {
+		info.TypeName = "." + string(field.Message().FullName())
+	}
+	if field.Enum() != nil {
+		info.TypeName = "." + string(field.Enum().FullName())
+	}
+	return info, true
+}
+
 // standardOptions lists the fields of each google.protobuf.*Options message in
 // descriptor.proto (protoc 36.2) and whether each is a bool.
 var standardOptions = map[string]map[string]bool{

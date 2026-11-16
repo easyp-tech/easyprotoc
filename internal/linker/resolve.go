@@ -106,7 +106,7 @@ func (t *SymbolTable) ResolveFile(fileID uint32, f *parser.ASTFile) {
 	pkg := f.Package.String(f.Src)
 
 	// 1. Resolve top-level extensions
-	for ei := range f.Extensions {
+	for _, ei := range children(f, f.TopLevelExtensions) {
 		ext := &f.Extensions[ei]
 		extFullName := joinScope(pkg, ext.Name.String(f.Src))
 		if extSymID, ok := t.ByName[extFullName]; ok {

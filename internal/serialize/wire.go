@@ -18,6 +18,35 @@ func NewWireSerializer() *WireSerializer {
 	}
 }
 
+// A bytes default is C-escaped in FieldDescriptorProto. String defaults
+// retain their decoded text.
+func fieldDefaultBytes(file *parser.ASTFile, field *parser.FieldNode) []byte {
+	value := field.DefaultVal.Bytes(file.Src)
+	if field.TypeKind != parser.TypeBytes {
+		return value
+	}
+	escaped := make([]byte, 0, len(value))
+	for _, character := range value {
+		switch character {
+		case '\n':
+			escaped = append(escaped, '\\', 'n')
+		case '\r':
+			escaped = append(escaped, '\\', 'r')
+		case '\t':
+			escaped = append(escaped, '\\', 't')
+		case '\\', '\'', '"':
+			escaped = append(escaped, '\\', character)
+		default:
+			if character < ' ' || character >= 0x7f {
+				escaped = append(escaped, '\\', '0'+(character>>6), '0'+((character>>3)&7), '0'+(character&7))
+				continue
+			}
+			escaped = append(escaped, character)
+		}
+	}
+	return escaped
+}
+
 func (s *WireSerializer) reset(totalFiles int) {
 	s.fileSizes = s.fileSizes[:0]
 	if cap(s.msgSizes) < totalFiles {
@@ -210,7 +239,7 @@ func (s *WireSerializer) computeFileSize(fileIdx int, f *parser.ASTFile, include
 		total += tagLen(6) + varintLen(uint64(sSize)) + int(sSize)
 	}
 	// Tag 7: extension
-	for xi := range f.Extensions {
+	for _, xi := range f.ChildIndices[f.TopLevelExtensions.Start:f.TopLevelExtensions.End()] {
 		fldSize := s.computeFieldSize(f, &f.Extensions[xi])
 		total += tagLen(7) + varintLen(uint64(fldSize)) + int(fldSize)
 	}
@@ -354,8 +383,9 @@ func (s *WireSerializer) computeFieldSize(f *parser.ASTFile, fld *parser.FieldNo
 	}
 
 	// Tag 7: default_value
-	if !fld.DefaultVal.IsEmpty() {
-		total += bytesFieldLen(7, fld.DefaultVal.Bytes(f.Src))
+	if !fld.DefaultOpt.IsEmpty() || !fld.DefaultVal.IsEmpty() {
+		value := fieldDefaultBytes(f, fld)
+		total += tagLen(7) + varintLen(uint64(len(value))) + len(value)
 	}
 
 	// Tag 8: options (FieldOptions)
@@ -816,7 +846,7 @@ func (s *WireSerializer) writeFileDescriptorProto(buf []byte, pos int, fileIdx i
 		pos = s.writeServiceDescriptorProto(buf, pos, f, uint32(si))
 	}
 	// Tag 7: extension (repeated FieldDescriptorProto)
-	for xi := range f.Extensions {
+	for _, xi := range f.ChildIndices[f.TopLevelExtensions.Start:f.TopLevelExtensions.End()] {
 		fldSize := s.computeFieldSize(f, &f.Extensions[xi])
 		pos = writeTag(buf, pos, 7, 2)
 		pos = writeVarint(buf, pos, uint64(fldSize))
@@ -974,8 +1004,11 @@ func (s *WireSerializer) writeFieldDescriptorProto(buf []byte, pos int, f *parse
 	}
 
 	// Tag 7: default_value
-	if !fld.DefaultVal.IsEmpty() {
-		pos = writeBytesField(buf, pos, 7, fld.DefaultVal.Bytes(f.Src))
+	if !fld.DefaultOpt.IsEmpty() || !fld.DefaultVal.IsEmpty() {
+		value := fieldDefaultBytes(f, fld)
+		pos = writeTag(buf, pos, 7, 2)
+		pos = writeVarint(buf, pos, uint64(len(value)))
+		pos += copy(buf[pos:], value)
 	}
 
 	// Tag 8: options

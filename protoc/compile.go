@@ -49,7 +49,7 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 	var outBytes []byte
 	var orderedFiles []*parser.ASTFile
 
-	useCustomResolvers := len(cfg.resolvers) > 0 || cfg.standardImports
+	useCustomResolvers := cfg.resolverOnly || len(cfg.resolvers) > 0 || cfg.standardImports
 	var readFileCb func(string) ([]byte, error)
 	var resolvePathCb func(string) (string, string, error)
 	if useCustomResolvers {
@@ -79,9 +79,6 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 
 	driver := compiler.NewDriver(driverOpts)
 	if err := driver.Compile(); err != nil {
-		if errors.Is(err, compiler.ErrCompilationFailed) {
-			return nil, ErrCompilationFailed
-		}
 		return nil, err
 	}
 
@@ -145,6 +142,7 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 // directory if none were given), then the well-known types if enabled. It
 // returns the import paths and the driver's path and read callbacks.
 func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string, func(string) ([]byte, error), func(string) (string, string, error)) {
+	withDirs = withDirs && !cfg.resolverOnly
 	// Build resolver chain:
 	// 1. Custom resolvers (in order of addition)
 	// 2. Directory resolvers for import paths
@@ -153,7 +151,7 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 	resolvers = append(resolvers, cfg.resolvers...)
 
 	importPaths := cfg.importPaths
-	if len(importPaths) == 0 {
+	if len(importPaths) == 0 && !cfg.resolverOnly {
 		importPaths = []string{"."}
 	}
 	if withDirs {
@@ -186,6 +184,19 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 	resolvePathFunc := func(path string) (canonical string, fullPath string, err error) {
 		if ctx != nil && ctx.Err() != nil {
 			return "", "", ctx.Err()
+		}
+
+		if cfg.resolverOnly {
+			cleanPath := filepath.ToSlash(filepath.Clean(path))
+			if _, ok := cacheGet(cleanPath); ok {
+				return cleanPath, cleanPath, nil
+			}
+			data, err := multiRes.FindFileByPath(ctx, cleanPath)
+			if err != nil {
+				return "", "", fmt.Errorf("%s: %w", path, err)
+			}
+			cachePut(cleanPath, data)
+			return cleanPath, cleanPath, nil
 		}
 
 		cleanPath := filepath.Clean(filepath.ToSlash(path))
@@ -225,7 +236,10 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 		}
 
 		// 3. Direct filesystem path fallback, only when reading the file system is allowed
-		if fi, sErr := os.Stat(path); withDirs && sErr == nil && !fi.IsDir() {
+		if !withDirs {
+			return "", "", fmt.Errorf("%s: File not found.", path)
+		}
+		if fi, sErr := os.Stat(path); sErr == nil && !fi.IsDir() {
 			for _, ip := range importPaths {
 				cleanIP := filepath.Clean(filepath.ToSlash(ip))
 				if cleanIP == "." {

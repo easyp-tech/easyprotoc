@@ -8,6 +8,7 @@ import (
 
 	"github.com/easyp-tech/easyprotoc/internal/linker"
 	"github.com/easyp-tech/easyprotoc/parser"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type assignment struct {
@@ -38,7 +39,7 @@ func EvaluateFile(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile) {
 	f.CustomOptionsWire = evaluateNodeOptions(table, fileID, f, pkg, ".google.protobuf.FileOptions", f.FileOptions)
 
 	// 2. Top-level extensions
-	for ei := range f.Extensions {
+	for _, ei := range f.ChildIndices[f.TopLevelExtensions.Start:f.TopLevelExtensions.End()] {
 		ext := &f.Extensions[ei]
 		ext.CustomOptionsWire = evaluateNodeOptions(table, fileID, f, pkg, ".google.protobuf.FieldOptions", ext.Options)
 	}
@@ -135,6 +136,7 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 	// Group root assignments by extension tag
 	groups := make(map[int32]*tagGroup)
 	tags := make([]int32, 0, 8)
+	var standard []assignment
 
 	for i := opts.Start; i < opts.End(); i++ {
 		optIdx := f.ChildIndices[i]
@@ -143,10 +145,20 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 			continue
 		}
 
-		firstPart := &f.OptionNameParts[opt.NameParts.Start]
+		parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
+		firstPart := &parts[0]
 		if !firstPart.IsExtension {
-			checkStandardOption(f, targetExtendee, opt, firstPart.Name.String(f.Src))
-			continue // Standard option, handled in wire serializer
+			name := firstPart.Name.String(f.Src)
+			checkStandardOption(f, targetExtendee, opt, name)
+			// Other standard options are emitted by the wire serializer.
+			if name == "features" && f.Syntax != parser.SyntaxEditions {
+				optionError(f, optionNamePos(opt), "features can only be specified with editions")
+				continue
+			}
+			if name == "features" || targetExtendee == ".google.protobuf.ExtensionRangeOptions" {
+				standard = append(standard, assignment{nameParts: parts, val: opt})
+			}
+			continue
 		}
 
 		extName := firstPart.Name.String(f.Src)
@@ -166,7 +178,6 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 			continue
 		}
 
-		parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
 		as := assignment{
 			nameParts: parts,
 			val:       opt,
@@ -186,14 +197,14 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 		grp.assignments = append(grp.assignments, as)
 	}
 
+	out := encodeMessage(table, fileID, f, scope, targetExtendee, standard)
 	if len(tags) == 0 {
-		return nil
+		return out
 	}
 
 	// Sort tags ascending
 	sort.Slice(tags, func(i, j int) bool { return tags[i] < tags[j] })
 
-	var out []byte
 	for _, tag := range tags {
 		grp := groups[tag]
 		if grp.sym.TypeKind == parser.TypeMessage {
@@ -280,6 +291,7 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 
 	groups := make(map[int32]*fieldGroup)
 	tags := make([]int32, 0, 8)
+	standard, _ := standardDescriptor(msgTypeName).(protoreflect.MessageDescriptor)
 
 	for _, as := range assignments {
 		if len(as.nameParts) == 0 {
@@ -291,7 +303,14 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 
 		if !first.IsExtension {
 			fldName := first.Name.String(f.Src)
-			fldInfo, found = table.MessageFields[msgTypeName][fldName]
+			if standard != nil {
+				fldInfo, found = standardField(standard, fldName)
+				if !found {
+					optionError(f, optionNamePos(as.val), fmt.Sprintf("Option field %q unknown in %s.", fldName, msgTypeName))
+				}
+			} else {
+				fldInfo, found = table.MessageFields[msgTypeName][fldName]
+			}
 		} else {
 			extName := first.Name.String(f.Src)
 			extSym, ok := table.ResolveSymbol(fileID, scope, extName)
@@ -535,7 +554,14 @@ func encodeScalarOrEnum(buf *[]byte, tag int32, typeKind parser.FieldTypeKind, t
 			}
 		} else if opt.ValKind == parser.OptionValIdent {
 			ident := opt.ValSpan.String(f.Src)
-			if num, ok := table.EnumValues[typeName][ident]; ok {
+			if standard, ok := standardDescriptor(typeName).(protoreflect.EnumDescriptor); ok {
+				value := standard.Values().ByName(protoreflect.Name(ident))
+				if value == nil {
+					optionError(f, opt.ValRawSpan.Start, fmt.Sprintf("Unknown value %q for %s.", ident, typeName))
+					return
+				}
+				enumNum = int32(value.Number())
+			} else if num, ok := table.EnumValues[typeName][ident]; ok {
 				enumNum = num
 			} else if sym, ok := table.ResolveSymbol(fileID, scope, ident); ok && sym.Kind == linker.SymEnumValue {
 				enumNum = sym.TagNumber

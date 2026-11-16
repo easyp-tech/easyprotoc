@@ -5,6 +5,7 @@ type Option func(*compileConfig)
 
 type compileConfig struct {
 	resolvers         []Resolver
+	resolverOnly      bool
 	importPaths       []string
 	includeImports    bool
 	includeSourceInfo bool
@@ -30,6 +31,16 @@ func WithResolver(r Resolver) Option {
 		if r != nil {
 			c.resolvers = append(c.resolvers, r)
 		}
+	}
+}
+
+// WithResolverOnly adds a resolver and disables file system fallbacks. Names
+// passed to resolvers are normalized logical paths. WithResolver and
+// WithStandardImports can explicitly add further sources.
+func WithResolverOnly(r Resolver) Option {
+	return func(c *compileConfig) {
+		c.resolverOnly = true
+		WithResolver(r)(c)
 	}
 }
 

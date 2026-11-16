@@ -20,6 +20,14 @@ type Resolver interface {
 	FindFileByPath(ctx context.Context, path string) ([]byte, error)
 }
 
+// ResolverFunc adapts a source lookup function to Resolver.
+type ResolverFunc func(context.Context, string) ([]byte, error)
+
+// FindFileByPath implements Resolver.
+func (f ResolverFunc) FindFileByPath(ctx context.Context, path string) ([]byte, error) {
+	return f(ctx, path)
+}
+
 // MemResolver resolves proto files directly from an in-memory map.
 type MemResolver map[string][]byte
 

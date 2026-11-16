@@ -277,6 +277,7 @@ func (p *Parser) ParseFile() (*ASTFile, error) {
 
 	topMsgs := make([]uint32, 0, 32)
 	topEnums := make([]uint32, 0, 16)
+	var topExtensions []uint32
 	topOptions := make([]uint32, 0, 16)
 	seenTypes := make(map[string]bool)
 
@@ -361,7 +362,8 @@ func (p *Parser) ParseFile() (*ASTFile, error) {
 			p.file.Decls = append(p.file.Decls, DeclRef{Kind: DeclService, Index: svcIdx})
 		case "extend":
 			p.next()
-			extBlockIdx, _ := p.parseExtend(nil, tok)
+			extBlockIdx, extensions := p.parseExtend(nil, tok)
+			topExtensions = append(topExtensions, extensions...)
 			p.file.Decls = append(p.file.Decls, DeclRef{Kind: DeclExtend, Index: extBlockIdx})
 		default:
 			p.errorAt(tok, fmt.Sprintf("unknown top-level declaration '%s'", ident))
@@ -371,6 +373,7 @@ func (p *Parser) ParseFile() (*ASTFile, error) {
 
 	p.file.TopLevelMessages = p.storeIndices(topMsgs)
 	p.file.TopLevelEnums = p.storeIndices(topEnums)
+	p.file.TopLevelExtensions = p.storeIndices(topExtensions)
 	p.file.FileOptions = p.storeIndices(topOptions)
 
 	// Gate post-processing: do not process malformed AST

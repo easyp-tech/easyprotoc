@@ -356,7 +356,10 @@ func (d *Driver) Compile() error {
 				} else {
 					fmt.Fprintln(os.Stderr, diag.String())
 				}
-				return ErrCompilationFailed
+				if errors.Is(err, ErrCompilationFailed) {
+					return err
+				}
+				return fmt.Errorf("%w: %w", ErrCompilationFailed, err)
 			}
 		}
 
