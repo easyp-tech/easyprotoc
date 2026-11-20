@@ -1468,6 +1468,10 @@ func resolveEdition(name string) uint64 {
 		return 1001
 	case "EDITION_2026":
 		return 1002
+	case "EDITION_UNSTABLE":
+		return 9999
+	case "EDITION_MAX":
+		return 0x7FFFFFFF
 	default:
 		return 0
 	}
