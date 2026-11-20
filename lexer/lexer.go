@@ -159,7 +159,7 @@ func matchExponent(b []byte) bool {
 // and the line start table, following the lexical grammar at
 // https://protobuf.com/docs/language-spec#lexical-elements.
 func Lex(src []byte, ts *TokenStream) error {
-	if len(src) > math.MaxUint32 {
+	if uint64(len(src)) > math.MaxUint32 {
 		return ErrFileTooLarge
 	}
 

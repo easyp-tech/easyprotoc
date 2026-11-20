@@ -145,8 +145,41 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 
 		firstPart := &f.OptionNameParts[opt.NameParts.Start]
 		if !firstPart.IsExtension {
-			checkStandardOption(f, targetExtendee, opt, firstPart.Name.String(f.Src))
-			continue // Standard option, handled in wire serializer
+			name := firstPart.Name.String(f.Src)
+			checkStandardOption(f, targetExtendee, opt, name)
+			if name != "features" {
+				continue // Standard option, handled in wire serializer
+			}
+			tag, ok := featureOptionTags[targetExtendee]
+			if !ok {
+				continue
+			}
+			parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
+			sym := &linker.Symbol{
+				Kind:      linker.SymField,
+				Name:      "features",
+				FullName:  strings.TrimPrefix(targetExtendee, ".") + ".features",
+				Extendee:  targetExtendee,
+				TagNumber: tag,
+				TypeKind:  parser.TypeMessage,
+				TypeName:  featureSetTypeName,
+				Label:     parser.LabelOptional,
+			}
+			grp, exists := groups[tag]
+			if !exists {
+				grp = &tagGroup{
+					tag: tag,
+					sym: sym,
+				}
+				groups[tag] = grp
+				tags = append(tags, tag)
+			}
+			grp.assignments = append(grp.assignments, assignment{
+				nameParts: parts,
+				val:       opt,
+				sym:       sym,
+			})
+			continue
 		}
 
 		extName := firstPart.Name.String(f.Src)
@@ -291,14 +324,17 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 
 		if !first.IsExtension {
 			fldName := first.Name.String(f.Src)
-			fldInfo, found = table.MessageFields[msgTypeName][fldName]
+			fldInfo, found = lookupMessageField(table, msgTypeName, fldName)
+			if !found && msgTypeName == featureSetTypeName {
+				optionError(f, optionNamePos(as.val), fmt.Sprintf("Option \"features.%s\" unknown.", fldName))
+			}
 		} else {
 			extName := first.Name.String(f.Src)
 			extSym, ok := table.ResolveSymbol(fileID, scope, extName)
 			if !ok {
 				extSym, ok = table.ResolveSymbol(fileID, msgTypeName, extName)
 			}
-			if ok && extSym.Kind == linker.SymExtension {
+			if ok && extSym.Kind == linker.SymExtension && (msgTypeName != featureSetTypeName || extSym.Extendee == msgTypeName) {
 				fldInfo = linker.FieldInfo{
 					Name:      extName,
 					TagNumber: extSym.TagNumber,
@@ -307,6 +343,8 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 					Label:     extSym.Label,
 				}
 				found = true
+			} else if msgTypeName == featureSetTypeName {
+				optionError(f, optionNamePos(as.val), fmt.Sprintf("Option \"(%s)\" unknown. Ensure that your proto definition file imports the proto which defines the option.", extName))
 			}
 		}
 
@@ -535,10 +573,12 @@ func encodeScalarOrEnum(buf *[]byte, tag int32, typeKind parser.FieldTypeKind, t
 			}
 		} else if opt.ValKind == parser.OptionValIdent {
 			ident := opt.ValSpan.String(f.Src)
-			if num, ok := table.EnumValues[typeName][ident]; ok {
+			if num, ok := lookupEnumValue(table, typeName, ident); ok {
 				enumNum = num
 			} else if sym, ok := table.ResolveSymbol(fileID, scope, ident); ok && sym.Kind == linker.SymEnumValue {
 				enumNum = sym.TagNumber
+			} else if strings.HasPrefix(typeName, featureSetTypeName+".") {
+				optionError(f, optionNamePos(opt), fmt.Sprintf("Unknown value %q for enum-valued option %q.", ident, strings.TrimPrefix(typeName, ".")))
 			}
 		}
 		*buf = appendTag(*buf, uint32(tag), 0)

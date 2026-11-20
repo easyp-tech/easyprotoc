@@ -8,7 +8,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/pluginpb"
 
 	"github.com/easyp-tech/easyprotoc/internal/serialize"
@@ -37,45 +39,109 @@ func (r *Result) WireBytes() []byte {
 func (r *Result) DescriptorSet() *descriptorpb.FileDescriptorSet {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.descriptorSet != nil {
-		return r.descriptorSet
-	}
-	var ds descriptorpb.FileDescriptorSet
-	if err := proto.Unmarshal(r.wireBytes, &ds); err != nil {
-		return nil
-	}
-	r.descriptorSet = &ds
-	return r.descriptorSet
-}
-
-// Files returns protoreflect.FileDescriptor instances for all files in DescriptorSet.
-func (r *Result) Files() []protoreflect.FileDescriptor {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.fileDescs != nil {
-		return r.fileDescs
-	}
-	ds := r.descriptorSet
-	if ds == nil {
-		var d descriptorpb.FileDescriptorSet
-		if err := proto.Unmarshal(r.wireBytes, &d); err != nil {
-			return nil
-		}
-		ds = &d
-		r.descriptorSet = ds
-	}
-	reg, err := protodesc.NewFiles(ds)
+	ds, err := r.descriptorSetLocked()
 	if err != nil {
 		return nil
 	}
-	var descs []protoreflect.FileDescriptor
-	for _, fdp := range ds.GetFile() {
-		if fd, err := reg.FindFileByPath(fdp.GetName()); err == nil {
-			descs = append(descs, fd)
+	return ds
+}
+
+func (r *Result) descriptorSetLocked() (*descriptorpb.FileDescriptorSet, error) {
+	if r.descriptorSet != nil {
+		return r.descriptorSet, nil
+	}
+	var ds descriptorpb.FileDescriptorSet
+	if err := proto.Unmarshal(r.wireBytes, &ds); err != nil {
+		return nil, err
+	}
+	r.descriptorSet = &ds
+	return r.descriptorSet, nil
+}
+
+// Files returns protoreflect.FileDescriptor instances for all files in DescriptorSet.
+func (r *Result) Files() ([]protoreflect.FileDescriptor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fileDescs != nil {
+		return r.fileDescs, nil
+	}
+	ds, err := r.descriptorSetLocked()
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal descriptor set: %w", err)
+	}
+	reg, err := protodesc.NewFiles(ds)
+	if err != nil {
+		return nil, fmt.Errorf("build file registry: %w", err)
+	}
+	if types := collectExtensionTypes(reg); types != nil {
+		var resolved descriptorpb.FileDescriptorSet
+		unmarshalOpts := proto.UnmarshalOptions{
+			Resolver: fallbackExtensionResolver{primary: types},
 		}
+		if err := unmarshalOpts.Unmarshal(r.wireBytes, &resolved); err != nil {
+			return nil, fmt.Errorf("resolve option extensions: %w", err)
+		}
+		reg, err = protodesc.NewFiles(&resolved)
+		if err != nil {
+			return nil, fmt.Errorf("rebuild file registry: %w", err)
+		}
+		r.descriptorSet = &resolved
+		ds = &resolved
+	}
+	descs := make([]protoreflect.FileDescriptor, 0, len(ds.GetFile()))
+	for _, fdp := range ds.GetFile() {
+		fd, err := reg.FindFileByPath(fdp.GetName())
+		if err != nil {
+			return nil, fmt.Errorf("find file %q: %w", fdp.GetName(), err)
+		}
+		descs = append(descs, fd)
 	}
 	r.fileDescs = descs
-	return r.fileDescs
+	return r.fileDescs, nil
+}
+
+type fallbackExtensionResolver struct {
+	primary *protoregistry.Types
+}
+
+func (r fallbackExtensionResolver) FindExtensionByName(field protoreflect.FullName) (protoreflect.ExtensionType, error) {
+	if xt, err := r.primary.FindExtensionByName(field); err == nil {
+		return xt, nil
+	}
+	return protoregistry.GlobalTypes.FindExtensionByName(field)
+}
+
+func (r fallbackExtensionResolver) FindExtensionByNumber(message protoreflect.FullName, field protoreflect.FieldNumber) (protoreflect.ExtensionType, error) {
+	if xt, err := r.primary.FindExtensionByNumber(message, field); err == nil {
+		return xt, nil
+	}
+	return protoregistry.GlobalTypes.FindExtensionByNumber(message, field)
+}
+
+func collectExtensionTypes(reg *protoregistry.Files) *protoregistry.Types {
+	var types *protoregistry.Types
+	register := func(exts protoreflect.ExtensionDescriptors) {
+		for i := 0; i < exts.Len(); i++ {
+			if types == nil {
+				types = new(protoregistry.Types)
+			}
+			_ = types.RegisterExtension(dynamicpb.NewExtensionType(exts.Get(i)))
+		}
+	}
+	var walkMessages func(msgs protoreflect.MessageDescriptors)
+	walkMessages = func(msgs protoreflect.MessageDescriptors) {
+		for i := 0; i < msgs.Len(); i++ {
+			m := msgs.Get(i)
+			register(m.Extensions())
+			walkMessages(m.Messages())
+		}
+	}
+	reg.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
+		register(fd.Extensions())
+		walkMessages(fd.Messages())
+		return true
+	})
+	return types
 }
 
 // CodeGeneratorRequest builds a CodeGeneratorRequest for plugin execution (REQ-8.9).
@@ -95,7 +161,11 @@ func (r *Result) CodeGeneratorRequest(parameter string) (*pluginpb.CodeGenerator
 		}
 		allDS = &ads
 	} else {
-		allDS = r.DescriptorSet()
+		var err error
+		allDS, err = r.descriptorSetLocked()
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal descriptor set: %w", err)
+		}
 	}
 
 	if allDS == nil {

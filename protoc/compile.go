@@ -140,23 +140,25 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 	}, nil
 }
 
-// sources builds the resolver chain: custom resolvers in order, then one
-// directory resolver per import path when withDirs is set (the current
-// directory if none were given), then the well-known types if enabled. It
-// returns the import paths and the driver's path and read callbacks.
+// sources builds the resolver chain: custom resolvers in order, or directory
+// resolvers per import path when withDirs is set and no custom resolver was
+// provided (defaulting to the current directory), followed by the well-known
+// types if enabled. It returns the import paths and the driver's path and read
+// callbacks.
 func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string, func(string) ([]byte, error), func(string) (string, string, error)) {
 	// Build resolver chain:
 	// 1. Custom resolvers (in order of addition)
-	// 2. Directory resolvers for import paths
+	// 2. Directory resolvers for import paths (only when no custom resolver is set)
 	// 3. Standard Well-Known Types resolver if enabled
 	var resolvers []Resolver
 	resolvers = append(resolvers, cfg.resolvers...)
 
+	allowDisk := withDirs && len(cfg.resolvers) == 0
 	importPaths := cfg.importPaths
-	if len(importPaths) == 0 {
+	if allowDisk && len(importPaths) == 0 {
 		importPaths = []string{"."}
 	}
-	if withDirs {
+	if allowDisk {
 		for _, ip := range importPaths {
 			resolvers = append(resolvers, DirResolver(ip))
 		}
@@ -202,6 +204,9 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 				cachePut(cleanPath, b)
 				return cleanPath, candidate, nil
 			}
+			if !errors.Is(rErr, ErrFileNotFound) {
+				return "", "", fmt.Errorf("%s: %w", path, rErr)
+			}
 		}
 
 		// 2. Direct lookup in resolver
@@ -223,31 +228,36 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 			cachePut(canon, b)
 			return canon, cleanPath, nil
 		}
+		if !errors.Is(rErr, ErrFileNotFound) {
+			return "", "", fmt.Errorf("%s: %w", path, rErr)
+		}
 
 		// 3. Direct filesystem path fallback, only when reading the file system is allowed
-		if fi, sErr := os.Stat(path); withDirs && sErr == nil && !fi.IsDir() {
-			for _, ip := range importPaths {
-				cleanIP := filepath.Clean(filepath.ToSlash(ip))
-				if cleanIP == "." {
-					continue
-				}
-				rel, rErr := filepath.Rel(cleanIP, cleanPath)
-				if rErr == nil && !strings.HasPrefix(rel, "..") && rel != "." {
-					b, err := os.ReadFile(path)
-					if err == nil {
-						cachePut(filepath.ToSlash(rel), b)
-						return filepath.ToSlash(rel), path, nil
+		if allowDisk {
+			if fi, sErr := os.Stat(path); sErr == nil && !fi.IsDir() {
+				for _, ip := range importPaths {
+					cleanIP := filepath.Clean(filepath.ToSlash(ip))
+					if cleanIP == "." {
+						continue
+					}
+					rel, rErr := filepath.Rel(cleanIP, cleanPath)
+					if rErr == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+						b, err := os.ReadFile(path)
+						if err == nil {
+							cachePut(filepath.ToSlash(rel), b)
+							return filepath.ToSlash(rel), path, nil
+						}
 					}
 				}
-			}
-			b, err := os.ReadFile(path)
-			if err == nil {
-				cachePut(cleanPath, b)
-				return cleanPath, path, nil
+				b, err := os.ReadFile(path)
+				if err == nil {
+					cachePut(cleanPath, b)
+					return cleanPath, path, nil
+				}
 			}
 		}
 
-		return "", "", fmt.Errorf("%s: File not found.", path)
+		return "", "", &compiler.FileNotFoundError{Path: path}
 	}
 
 	readFileFunc := func(canonicalPath string) ([]byte, error) {

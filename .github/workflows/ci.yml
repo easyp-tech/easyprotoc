@@ -35,6 +35,7 @@ jobs:
       - name: Build
         run: |
           go build ./cmd/easyprotoc
+          GOOS=linux GOARCH=arm GOARM=7 go build ./...
           (cd bench && go build ./...)
 
   lint:
