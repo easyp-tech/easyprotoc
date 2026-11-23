@@ -8,7 +8,6 @@ import (
 
 	"github.com/easyp-tech/easyprotoc/internal/linker"
 	"github.com/easyp-tech/easyprotoc/parser"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type assignment struct {
@@ -136,7 +135,7 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 	// Group root assignments by extension tag
 	groups := make(map[int32]*tagGroup)
 	tags := make([]int32, 0, 8)
-	var standard []assignment
+	var rangeOptions []assignment
 
 	for i := opts.Start; i < opts.End(); i++ {
 		optIdx := f.ChildIndices[i]
@@ -145,19 +144,50 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 			continue
 		}
 
-		parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
-		firstPart := &parts[0]
+		firstPart := &f.OptionNameParts[opt.NameParts.Start]
 		if !firstPart.IsExtension {
 			name := firstPart.Name.String(f.Src)
 			checkStandardOption(f, targetExtendee, opt, name)
-			// Other standard options are emitted by the wire serializer.
-			if name == "features" && f.Syntax != parser.SyntaxEditions {
+			if name != "features" {
+				if targetExtendee == extensionRangeOptionsType {
+					parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
+					rangeOptions = append(rangeOptions, assignment{nameParts: parts, val: opt})
+				}
+				continue
+			}
+			if f.Syntax != parser.SyntaxEditions {
 				optionError(f, optionNamePos(opt), "features can only be specified with editions")
 				continue
 			}
-			if name == "features" || targetExtendee == ".google.protobuf.ExtensionRangeOptions" {
-				standard = append(standard, assignment{nameParts: parts, val: opt})
+			tag, ok := featureOptionTags[targetExtendee]
+			if !ok {
+				continue
 			}
+			parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
+			sym := &linker.Symbol{
+				Kind:      linker.SymField,
+				Name:      "features",
+				FullName:  strings.TrimPrefix(targetExtendee, ".") + ".features",
+				Extendee:  targetExtendee,
+				TagNumber: tag,
+				TypeKind:  parser.TypeMessage,
+				TypeName:  featureSetTypeName,
+				Label:     parser.LabelOptional,
+			}
+			grp, exists := groups[tag]
+			if !exists {
+				grp = &tagGroup{
+					tag: tag,
+					sym: sym,
+				}
+				groups[tag] = grp
+				tags = append(tags, tag)
+			}
+			grp.assignments = append(grp.assignments, assignment{
+				nameParts: parts,
+				val:       opt,
+				sym:       sym,
+			})
 			continue
 		}
 
@@ -178,6 +208,7 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 			continue
 		}
 
+		parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
 		as := assignment{
 			nameParts: parts,
 			val:       opt,
@@ -197,7 +228,7 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 		grp.assignments = append(grp.assignments, as)
 	}
 
-	out := encodeMessage(table, fileID, f, scope, targetExtendee, standard)
+	out := encodeMessage(table, fileID, f, scope, targetExtendee, rangeOptions)
 	if len(tags) == 0 {
 		return out
 	}
@@ -291,7 +322,6 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 
 	groups := make(map[int32]*fieldGroup)
 	tags := make([]int32, 0, 8)
-	standard, _ := standardDescriptor(msgTypeName).(protoreflect.MessageDescriptor)
 
 	for _, as := range assignments {
 		if len(as.nameParts) == 0 {
@@ -303,13 +333,9 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 
 		if !first.IsExtension {
 			fldName := first.Name.String(f.Src)
-			if standard != nil {
-				fldInfo, found = standardField(standard, fldName)
-				if !found {
-					optionError(f, optionNamePos(as.val), fmt.Sprintf("Option field %q unknown in %s.", fldName, msgTypeName))
-				}
-			} else {
-				fldInfo, found = table.MessageFields[msgTypeName][fldName]
+			fldInfo, found = lookupMessageField(table, msgTypeName, fldName)
+			if !found && msgTypeName == featureSetTypeName {
+				optionError(f, optionNamePos(as.val), fmt.Sprintf("Option \"features.%s\" unknown.", fldName))
 			}
 		} else {
 			extName := first.Name.String(f.Src)
@@ -317,7 +343,7 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 			if !ok {
 				extSym, ok = table.ResolveSymbol(fileID, msgTypeName, extName)
 			}
-			if ok && extSym.Kind == linker.SymExtension {
+			if ok && extSym.Kind == linker.SymExtension && (msgTypeName != featureSetTypeName || extSym.Extendee == msgTypeName) {
 				fldInfo = linker.FieldInfo{
 					Name:      extName,
 					TagNumber: extSym.TagNumber,
@@ -326,6 +352,8 @@ func encodeMessage(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile, 
 					Label:     extSym.Label,
 				}
 				found = true
+			} else if msgTypeName == featureSetTypeName {
+				optionError(f, optionNamePos(as.val), fmt.Sprintf("Option \"(%s)\" unknown. Ensure that your proto definition file imports the proto which defines the option.", extName))
 			}
 		}
 
@@ -554,17 +582,12 @@ func encodeScalarOrEnum(buf *[]byte, tag int32, typeKind parser.FieldTypeKind, t
 			}
 		} else if opt.ValKind == parser.OptionValIdent {
 			ident := opt.ValSpan.String(f.Src)
-			if standard, ok := standardDescriptor(typeName).(protoreflect.EnumDescriptor); ok {
-				value := standard.Values().ByName(protoreflect.Name(ident))
-				if value == nil {
-					optionError(f, opt.ValRawSpan.Start, fmt.Sprintf("Unknown value %q for %s.", ident, typeName))
-					return
-				}
-				enumNum = int32(value.Number())
-			} else if num, ok := table.EnumValues[typeName][ident]; ok {
+			if num, ok := lookupEnumValue(table, typeName, ident); ok {
 				enumNum = num
 			} else if sym, ok := table.ResolveSymbol(fileID, scope, ident); ok && sym.Kind == linker.SymEnumValue {
 				enumNum = sym.TagNumber
+			} else if strings.HasPrefix(typeName, featureSetTypeName+".") {
+				optionError(f, optionNamePos(opt), fmt.Sprintf("Unknown value %q for enum-valued option %q.", ident, strings.TrimPrefix(typeName, ".")))
 			}
 		}
 		*buf = appendTag(*buf, uint32(tag), 0)

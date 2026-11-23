@@ -28,10 +28,10 @@ func TestCompileResolverOnlyDoesNotReadDisk(t *testing.T) {
 					diagnostics = append(diagnostics, d)
 				}),
 			)
-			if result != nil || !errors.Is(err, cause) || !errors.Is(err, ErrCompilationFailed) {
+			if result != nil || !errors.Is(err, cause) {
 				t.Fatalf("Compile = %v, %v, want failure wrapping %v", result, err, cause)
 			}
-			if len(diagnostics) != 1 || diagnostics[0].Path != "entry.proto" {
+			if errors.Is(cause, ErrFileNotFound) && (len(diagnostics) != 1 || diagnostics[0].Path != "entry.proto") {
 				t.Fatalf("diagnostics = %v, want an import diagnostic at entry.proto", diagnostics)
 			}
 		})

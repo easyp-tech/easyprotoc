@@ -7,11 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/easyp-tech/easyprotoc/internal/compiler"
 	"github.com/easyp-tech/easyprotoc/protoc/wkt"
 )
 
 // ErrFileNotFound indicates that a requested proto file could not be found.
-var ErrFileNotFound = errors.New("file not found")
+var ErrFileNotFound = compiler.ErrFileNotFound
 
 // Resolver abstracts file resolution for the protoc compiler.
 type Resolver interface {

@@ -10,6 +10,8 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
+const extensionRangeOptionsType = ".google.protobuf.ExtensionRangeOptions"
+
 func standardDescriptor(name string) protoreflect.Descriptor {
 	if !strings.HasPrefix(name, ".google.protobuf.") {
 		return nil

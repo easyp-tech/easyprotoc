@@ -272,7 +272,10 @@ message Person {
 		t.Fatalf("Compile failed: %v", err)
 	}
 
-	files := res.Files()
+	files, err := res.Files()
+	if err != nil {
+		t.Fatalf("Files failed: %v", err)
+	}
 	if len(files) != 1 {
 		t.Fatalf("Expected 1 protoreflect.FileDescriptor, got %d", len(files))
 	}
@@ -395,7 +398,11 @@ message %s {
 				errs[idx] = fmt.Errorf("expected package %s, got %s", pkgName, ds.GetFile()[0].GetPackage())
 				return
 			}
-			files := res.Files()
+			files, err := res.Files()
+			if err != nil {
+				errs[idx] = fmt.Errorf("Files failed: %w", err)
+				return
+			}
 			if len(files) != 1 || files[0].Messages().ByName(protoreflect.Name(msgName)) == nil {
 				errs[idx] = fmt.Errorf("expected message %s in files", msgName)
 				return

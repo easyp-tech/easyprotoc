@@ -23,6 +23,21 @@ import (
 // ErrCompilationFailed indicates that syntax or semantic errors occurred and were printed.
 var ErrCompilationFailed = errors.New("compilation failed")
 
+// ErrFileNotFound indicates that a requested proto source could not be found.
+var ErrFileNotFound = errors.New("file not found")
+
+// FileNotFoundError preserves protoc's "<path>: File not found." message while
+// unwrapping to ErrFileNotFound.
+type FileNotFoundError struct {
+	Path string
+}
+
+// Error implements the error interface.
+func (e *FileNotFoundError) Error() string { return fmt.Sprintf("%s: File not found.", e.Path) }
+
+// Unwrap returns ErrFileNotFound.
+func (e *FileNotFoundError) Unwrap() error { return ErrFileNotFound }
+
 // Driver coordinates file reading, lexing, parsing, and wire serialization.
 type Driver struct {
 	opts    *Options
@@ -341,6 +356,9 @@ func (d *Driver) Compile() error {
 		for _, imp := range ast.Imports {
 			impPath := imp.Path.String(ast.Src)
 			if err := visit(impPath); err != nil {
+				if !errors.Is(err, ErrCompilationFailed) && !errors.Is(err, ErrFileNotFound) {
+					return err
+				}
 				line, col := 2, 1
 				if ast.Tokens != nil {
 					line, col = ast.Tokens.LineCol(ast.Src, imp.Span.Start)
@@ -627,5 +645,5 @@ func (d *Driver) resolvePath(path string) (canonical string, fullPath string, er
 		return path, path, nil
 	}
 
-	return "", "", fmt.Errorf("%s: File not found.", path)
+	return "", "", &FileNotFoundError{Path: path}
 }

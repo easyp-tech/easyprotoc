@@ -878,13 +878,30 @@ func (p *Parser) parseAggregateField() *OptionNode {
 	})
 
 	for p.matchPunct('.') {
-		subName, ok := p.expectIdent("aggregate subfield name")
-		if !ok {
-			return nil
+		subIsExt := false
+		var subName TextSpan
+		if p.matchPunct('[') {
+			subIsExt = true
+			subName = p.parseFullIdent()
+			if !p.expectPunct(']') {
+				return nil
+			}
+		} else if p.matchPunct('(') {
+			subIsExt = true
+			subName = p.parseFullIdent()
+			if !p.expectPunct(')') {
+				return nil
+			}
+		} else {
+			var ok bool
+			subName, ok = p.expectIdent("aggregate subfield name")
+			if !ok {
+				return nil
+			}
 		}
 		p.file.OptionNameParts = append(p.file.OptionNameParts, OptionNamePartNode{
 			Name:        subName,
-			IsExtension: false,
+			IsExtension: subIsExt,
 		})
 	}
 
@@ -1354,13 +1371,24 @@ func (p *Parser) parseFieldOptionItem(customJSON *TextSpan, customJSONOpt *TextS
 	})
 
 	for p.matchPunct('.') {
-		subName, ok := p.expectIdent("option subfield name")
-		if !ok {
-			return 0, false, false
+		subIsExt := false
+		var subName TextSpan
+		if p.matchPunct('(') {
+			subIsExt = true
+			subName = p.parseFullIdent()
+			if !p.expectPunct(')') {
+				return 0, false, false
+			}
+		} else {
+			var ok bool
+			subName, ok = p.expectIdent("option subfield name")
+			if !ok {
+				return 0, false, false
+			}
 		}
 		p.file.OptionNameParts = append(p.file.OptionNameParts, OptionNamePartNode{
 			Name:        subName,
-			IsExtension: false,
+			IsExtension: subIsExt,
 		})
 	}
 
