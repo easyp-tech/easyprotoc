@@ -155,8 +155,11 @@ commit into `bench/.cache`.
 
 ```sh
 bench/run.sh          # all three tables: with source info, without it, parsing only
-bench/run.sh parity   # check that easyprotoc writes the same descriptors as protoc
+bench/run.sh parity   # compare descriptors against protoc --retain_options
 ```
+
+The parity check passes `--retain_options` to `protoc` because easyprotoc
+includes source-retention options in its descriptor sets.
 
 `MODES` (`full nosrc parse`), `RUNS`, `CORPORA` and `IMPLS` narrow a run, and `CANDIDATE=/path/to/binary`
 adds any other protoc-compatible compiler to the table. Results go to

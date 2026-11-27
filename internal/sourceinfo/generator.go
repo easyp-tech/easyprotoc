@@ -551,6 +551,16 @@ func (g *generator) generateExtensionRangeDecl(erDecl *parser.ExtensionRangeDecl
 			endSpan = er.StartSpan
 		}
 		g.addLoc(append(slicesClone(rPath), 2), endSpan)
+		if !er.OptionsSpan.IsEmpty() {
+			optionsPath := append(slicesClone(rPath), 3)
+			g.addLoc(optionsPath, er.OptionsSpan)
+			optionCounts := make(map[int32]int32)
+			var uninterpretedIndex int32
+			for optionIndex := er.Options.Start; optionIndex < er.Options.End(); optionIndex++ {
+				option := &g.file.Options[g.file.ChildIndices[optionIndex]]
+				g.generateOption(option, true, ".google.protobuf.ExtensionRangeOptions", optionsPath, optionCounts, &uninterpretedIndex)
+			}
+		}
 	}
 }
 
@@ -599,9 +609,8 @@ func (g *generator) generateOption(opt *parser.OptionNode, compact bool, targetT
 	if !firstPart.IsExtension {
 		optName := firstPart.Name.String(g.file.Src)
 		tag = lookupStandardOptionTag(targetType, optName)
-		if targetType == ".google.protobuf.FieldOptions" && (tag == 19 || tag == 20) {
-			isRep = true
-		}
+		isRep = (targetType == ".google.protobuf.FieldOptions" && (tag == 19 || tag == 20)) ||
+			(targetType == ".google.protobuf.ExtensionRangeOptions" && optName == "declaration")
 	} else {
 		extName := firstPart.Name.String(g.file.Src)
 		pkg := g.file.Package.String(g.file.Src)

@@ -2,6 +2,7 @@ package protoc
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -20,7 +21,7 @@ message Message {
     verification = DECLARATION
   ];
 }`),
-	}))
+	}), WithIncludeSourceInfo(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +34,32 @@ message Message {
 	}
 	if opts.Verification == nil || opts.GetVerification() != descriptorpb.ExtensionRangeOptions_DECLARATION {
 		t.Fatalf("verification = %v", opts)
+	}
+
+	optionPath := []int32{4, 0, 5, 0, 3}
+	want := []struct {
+		path []int32
+		span []int32
+	}{
+		{optionPath, []int32{3, 24, 7, 3}},
+		{[]int32{4, 0, 5, 0, 3, 2, 0}, []int32{4, 4, 75}},
+		{[]int32{4, 0, 5, 0, 3, 2, 1}, []int32{5, 4, 49}},
+		{[]int32{4, 0, 5, 0, 3, 3}, []int32{6, 4, 30}},
+	}
+	var locations []*descriptorpb.SourceCodeInfo_Location
+	for _, location := range result.DescriptorSet().File[0].GetSourceCodeInfo().GetLocation() {
+		path := location.GetPath()
+		if len(path) >= len(optionPath) && slices.Equal(path[:len(optionPath)], optionPath) {
+			locations = append(locations, location)
+		}
+	}
+	if len(locations) != len(want) {
+		t.Fatalf("extension range option locations = %v, want %d locations", locations, len(want))
+	}
+	for index, location := range locations {
+		if !slices.Equal(location.GetPath(), want[index].path) || !slices.Equal(location.GetSpan(), want[index].span) {
+			t.Errorf("location %d = %v, want path %v and span %v", index, location, want[index].path, want[index].span)
+		}
 	}
 }
 
