@@ -1,8 +1,11 @@
 package options
 
 import (
+	"strings"
+
 	"github.com/easyp-tech/easyprotoc/internal/linker"
 	"github.com/easyp-tech/easyprotoc/parser"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 const featureSetTypeName = ".google.protobuf.FeatureSet"
@@ -152,6 +155,11 @@ func lookupMessageField(table *linker.SymbolTable, msgTypeName, fldName string) 
 		info, found := builtinFeatureSetFields[fldName]
 		return info, found
 	}
+	if msgTypeName == extensionRangeOptionsType || strings.HasPrefix(msgTypeName, extensionRangeOptionsType+".") {
+		if message, ok := standardDescriptor(msgTypeName).(protoreflect.MessageDescriptor); ok {
+			return standardField(message, fldName)
+		}
+	}
 	return linker.FieldInfo{}, false
 }
 
@@ -164,6 +172,13 @@ func lookupEnumValue(table *linker.SymbolTable, typeName, ident string) (int32, 
 	if values, ok := builtinFeatureSetEnums[typeName]; ok {
 		if num, found := values[ident]; found {
 			return num, true
+		}
+	}
+	if strings.HasPrefix(typeName, extensionRangeOptionsType+".") {
+		if enum, ok := standardDescriptor(typeName).(protoreflect.EnumDescriptor); ok {
+			if value := enum.Values().ByName(protoreflect.Name(ident)); value != nil {
+				return int32(value.Number()), true
+			}
 		}
 	}
 	return 0, false

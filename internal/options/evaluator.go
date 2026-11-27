@@ -38,7 +38,7 @@ func EvaluateFile(table *linker.SymbolTable, fileID uint32, f *parser.ASTFile) {
 	f.CustomOptionsWire = evaluateNodeOptions(table, fileID, f, pkg, ".google.protobuf.FileOptions", f.FileOptions)
 
 	// 2. Top-level extensions
-	for ei := range f.Extensions {
+	for _, ei := range f.ChildIndices[f.TopLevelExtensions.Start:f.TopLevelExtensions.End()] {
 		ext := &f.Extensions[ei]
 		ext.CustomOptionsWire = evaluateNodeOptions(table, fileID, f, pkg, ".google.protobuf.FieldOptions", ext.Options)
 	}
@@ -135,6 +135,7 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 	// Group root assignments by extension tag
 	groups := make(map[int32]*tagGroup)
 	tags := make([]int32, 0, 8)
+	var rangeOptions []assignment
 
 	for i := opts.Start; i < opts.End(); i++ {
 		optIdx := f.ChildIndices[i]
@@ -148,7 +149,15 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 			name := firstPart.Name.String(f.Src)
 			checkStandardOption(f, targetExtendee, opt, name)
 			if name != "features" {
-				continue // Standard option, handled in wire serializer
+				if targetExtendee == extensionRangeOptionsType {
+					parts := f.OptionNameParts[opt.NameParts.Start:opt.NameParts.End()]
+					rangeOptions = append(rangeOptions, assignment{nameParts: parts, val: opt})
+				}
+				continue
+			}
+			if f.Syntax != parser.SyntaxEditions {
+				optionError(f, optionNamePos(opt), "features can only be specified with editions")
+				continue
 			}
 			tag, ok := featureOptionTags[targetExtendee]
 			if !ok {
@@ -219,14 +228,14 @@ func evaluateNodeOptions(table *linker.SymbolTable, fileID uint32, f *parser.AST
 		grp.assignments = append(grp.assignments, as)
 	}
 
+	out := encodeMessage(table, fileID, f, scope, targetExtendee, rangeOptions)
 	if len(tags) == 0 {
-		return nil
+		return out
 	}
 
 	// Sort tags ascending
 	sort.Slice(tags, func(i, j int) bool { return tags[i] < tags[j] })
 
-	var out []byte
 	for _, tag := range tags {
 		grp := groups[tag]
 		if grp.sym.TypeKind == parser.TypeMessage {

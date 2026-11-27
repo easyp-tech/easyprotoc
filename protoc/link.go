@@ -97,9 +97,6 @@ func Link(ctx context.Context, files []string, opts ...Option) (*Linked, error) 
 		},
 	})
 	if err := driver.Compile(); err != nil {
-		if errors.Is(err, compiler.ErrCompilationFailed) {
-			return nil, ErrCompilationFailed
-		}
 		return nil, err
 	}
 

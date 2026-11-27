@@ -49,7 +49,7 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 	var outBytes []byte
 	var orderedFiles []*parser.ASTFile
 
-	useCustomResolvers := len(cfg.resolvers) > 0 || cfg.standardImports
+	useCustomResolvers := cfg.resolverOnly || len(cfg.resolvers) > 0 || cfg.standardImports
 	var readFileCb func(string) ([]byte, error)
 	var resolvePathCb func(string) (string, string, error)
 	if useCustomResolvers {
@@ -79,9 +79,6 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 
 	driver := compiler.NewDriver(driverOpts)
 	if err := driver.Compile(); err != nil {
-		if errors.Is(err, compiler.ErrCompilationFailed) {
-			return nil, ErrCompilationFailed
-		}
 		return nil, err
 	}
 
@@ -101,7 +98,7 @@ func Compile(ctx context.Context, files []string, opts ...Option) (*Result, erro
 			filesToGen = append(filesToGen, c)
 			continue
 		}
-		cleanF := strings.TrimPrefix(filepath.Clean(filepath.ToSlash(f)), "./")
+		cleanF := filepath.ToSlash(filepath.Clean(f))
 		if c, ok := knownCanon[cleanF]; ok {
 			filesToGen = append(filesToGen, c)
 			continue
@@ -153,8 +150,11 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 	var resolvers []Resolver
 	resolvers = append(resolvers, cfg.resolvers...)
 
-	allowDisk := withDirs && len(cfg.resolvers) == 0
+	allowDisk := withDirs && !cfg.resolverOnly && len(cfg.resolvers) == 0
 	importPaths := cfg.importPaths
+	if cfg.resolverOnly {
+		importPaths = nil
+	}
 	if allowDisk && len(importPaths) == 0 {
 		importPaths = []string{"."}
 	}
@@ -190,8 +190,7 @@ func (cfg *compileConfig) sources(ctx context.Context, withDirs bool) ([]string,
 			return "", "", ctx.Err()
 		}
 
-		cleanPath := filepath.Clean(filepath.ToSlash(path))
-		cleanPath = strings.TrimPrefix(cleanPath, "./")
+		cleanPath := filepath.ToSlash(filepath.Clean(path))
 
 		// 1. Check if relative to each import path in order
 		for _, ip := range importPaths {

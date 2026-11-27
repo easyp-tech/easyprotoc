@@ -375,10 +375,11 @@ type ASTFile struct {
 	Package     TextSpan           // Package identifier
 	PackageSpan TextSpan           // Entire package statement span
 
-	TopLevelMessages Span32 // Range in ChildIndices pointing to Messages
-	TopLevelEnums    Span32 // Range in ChildIndices pointing to Enums
-	FileOptions      Span32 // Range in ChildIndices pointing to Options
-	ChildIndices     []uint32
+	TopLevelMessages   Span32 // Range in ChildIndices pointing to Messages
+	TopLevelEnums      Span32 // Range in ChildIndices pointing to Enums
+	TopLevelExtensions Span32 // Range in ChildIndices pointing to file-level Extensions
+	FileOptions        Span32 // Range in ChildIndices pointing to Options
+	ChildIndices       []uint32
 
 	Imports             []ImportNode
 	Messages            []MessageNode

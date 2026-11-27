@@ -117,9 +117,14 @@ if [ "$command" = parity ]; then
   status=0
   for corpus in $corpora; do
     for impl in protoc easyprotoc; do
+      retain_options=""
+      if [ "$impl" = protoc ]; then
+        # Match easyprotoc's descriptors, which retain source-only options.
+        retain_options="--retain_options"
+      fi
       # Both print unused-import warnings on googleapis; show output only on failure.
-      # shellcheck disable=SC2046
-      if ! $(impl_cmd "$impl") $(compile_args "$corpus" "$tmp/$impl.pb") >"$tmp/log" 2>&1; then
+      # shellcheck disable=SC2046,SC2086
+      if ! $(impl_cmd "$impl") $retain_options $(compile_args "$corpus" "$tmp/$impl.pb") >"$tmp/log" 2>&1; then
         cat "$tmp/log" >&2
         echo "$corpus: $impl failed" >&2
         exit 1

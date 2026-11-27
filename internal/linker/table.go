@@ -242,11 +242,11 @@ func (t *SymbolTable) indexFileSymbols(fileID uint32, f *parser.ASTFile) {
 	}
 
 	// Top-level Extensions
-	for ei := range f.Extensions {
+	for _, ei := range children(f, f.TopLevelExtensions) {
 		ext := &f.Extensions[ei]
 		extName := ext.Name.String(f.Src)
 		extFullName := joinScope(pkg, extName)
-		symID := t.addSymbol(SymExtension, fileID, NoParent, extName, extFullName, uint32(ei))
+		symID := t.addSymbol(SymExtension, fileID, NoParent, extName, extFullName, ei)
 		t.Symbols[symID].TagNumber = ext.Number
 		t.Symbols[symID].TypeKind = ext.TypeKind
 		t.Symbols[symID].TypeName = ext.TypeName.String(f.Src)
